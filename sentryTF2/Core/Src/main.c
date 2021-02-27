@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,16 +55,39 @@ static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 static void delay_us(uint16_t us);
+static void calcObjDist(uint32_t totalTime);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int firstCaptured = 0;
+uint32_t totalTimeOne = 0;
+int32_t totalFinal = 0;
+int velSound = 34300; // in cm/s
+int distance = 0;
 
 void delay_us(uint16_t us){
 	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
 	while(__HAL_TIM_GET_COUNTER(&htim3) < us);
 }
+
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
+	if(htim == &htim1 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1){
+		if(firstCaptured == 0) firstCaptured++;
+		else if(firstCaptured == 1){
+			totalTimeOne = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2); //Retrieves pulse width value from ultrasonic
+			calcObjDist(totalTimeOne);
+			firstCaptured--;
+		}
+	}
+}
+
+void calcObjDist(uint32_t totalTime){
+	totalFinal = totalTime/2;
+	distance = totalFinal * velSound * pow(10,-6);
+}
+
 /* USER CODE END 0 */
 
 /**
