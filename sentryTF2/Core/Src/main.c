@@ -22,7 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <math.h>
+#include "testSound.h"
+#include "math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,6 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define PI 3.1415926
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -41,8 +43,12 @@
 
 /* Private variables ---------------------------------------------------------*/
 
+DAC_HandleTypeDef hdac;
+DMA_HandleTypeDef hdma_dac1;
+
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
 
@@ -51,13 +57,17 @@ TIM_HandleTypeDef htim3;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_DAC_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 static void delay_us(uint16_t us);
 static void calcObjDist(uint32_t totalTime);
 static void sensorRoutine();
 
+static void getSineVal();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -67,6 +77,9 @@ uint32_t totalTimeOne = 0;
 int32_t totalFinal = 0;
 int velSound = 34300; // in cm/s
 int distance = 0;
+
+float startVolt = 0.5;
+uint32_t sineVal[100];
 
 void delay_us(uint16_t us){
 	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
@@ -95,6 +108,34 @@ void sensorRoutine(){
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_RESET);
 	HAL_Delay(100);
 }
+
+void getSineVal(){
+	for(int i = 0; i < 100; i++){
+		sineVal[i] = (sin(i*PI/5)+1)*((0xFFF+1)/2);
+	}
+}
+
+#define _AMP(x) ( x / 2 )
+const size_t SINE_SAMPLES = 32;
+const uint16_t SINE_WAVE[] = {
+  _AMP(2048), _AMP(2447), _AMP(2831), _AMP(3185),
+  _AMP(3495), _AMP(3750), _AMP(3939), _AMP(4056),
+  _AMP(4095), _AMP(4056), _AMP(3939), _AMP(3750),
+  _AMP(3495), _AMP(3185), _AMP(2831), _AMP(2447),
+  _AMP(2048), _AMP(1649), _AMP(1265), _AMP(911),
+  _AMP(601),  _AMP(346),  _AMP(157),  _AMP(40),
+  _AMP(0),    _AMP(40),   _AMP(157),  _AMP(346),
+  _AMP(601),  _AMP(911),  _AMP(1265), _AMP(1649)
+};
+
+/*uint16_t testWav[] = {0x07ff, 0x083f, 0x087e, 0x08be, 0x08fc,
+		0x093a, 0x0976, 0x09b1, 0x09ea, 0x0a22, 0x0a57, 0x0a89,
+		0x0aba, 0x0ae7, 0x0b11, 0x0b39, 0x0b5d, 0x0b7e, 0x0b9b,
+		0x0bb5, 0x0bcb, 0x0bdd, 0x0beb, 0x0bf5, 0x0bfb, 0x0bfd,
+		0x0bfc, 0x0bf6, 0x0bec, 0x0bde, 0x0bcd, 0x0bb7,
+		0x0b9e, 0x097d, 0x0941, 0x0903, 0x08c5, 0x0886, 0x0846,
+
+};*/
 /* USER CODE END 0 */
 
 /**
@@ -125,20 +166,29 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM1_Init();
   MX_TIM3_Init();
+  MX_DAC_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
   HAL_TIM_Base_Start(&htim3);
+
+  getSineVal();
+  HAL_TIM_Base_Start(&htim6);
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, sineVal, 100, DAC_ALIGN_12B_R);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  sensorRoutine();
-	  if(distance < 12){
+
+	  //sensorRoutine();
+	  /*if(distance < 12){
 		  for(int i = 0; i < 12; i++){
 			  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
 			  HAL_Delay(250);
@@ -146,7 +196,7 @@ int main(void)
 	  }
 	  else{
 		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-	  }
+	  }*/
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -191,6 +241,44 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief DAC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_DAC_Init(void)
+{
+
+  /* USER CODE BEGIN DAC_Init 0 */
+
+  /* USER CODE END DAC_Init 0 */
+
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN DAC_Init 1 */
+
+  /* USER CODE END DAC_Init 1 */
+  /** DAC Initialization
+  */
+  hdac.Instance = DAC;
+  if (HAL_DAC_Init(&hdac) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** DAC channel OUT1 config
+  */
+  sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_DISABLE;
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN DAC_Init 2 */
+
+  /* USER CODE END DAC_Init 2 */
+
 }
 
 /**
@@ -314,6 +402,60 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 2-1;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 22-1;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -323,6 +465,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
