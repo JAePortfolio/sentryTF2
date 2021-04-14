@@ -60,7 +60,17 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define USER_Btn_Pin GPIO_PIN_13
+#define USER_Btn_GPIO_Port GPIOC
+#define USER_Btn_EXTI_IRQn EXTI15_10_IRQn
+#define USART_TX_Pin GPIO_PIN_10
+#define USART_TX_GPIO_Port GPIOB
+#define USART_RX_Pin GPIO_PIN_11
+#define USART_RX_GPIO_Port GPIOB
+#define LD2_Pin GPIO_PIN_7
+#define LD2_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
+extern uint8_t bufRec[256];
 
 /* USER CODE END Private defines */
 
