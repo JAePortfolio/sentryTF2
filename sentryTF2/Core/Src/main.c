@@ -305,6 +305,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+	  uint8_t buffer[] = "hello";
+	  HAL_UART_Transmit(&huart3,buffer,sizeof(buffer),HAL_MAX_DELAY);
+	  HAL_UART_Receive_IT(&huart3,bufRec,sizeof(bufRec));
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
