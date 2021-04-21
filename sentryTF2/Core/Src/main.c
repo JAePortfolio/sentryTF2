@@ -35,6 +35,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PI 3.1415926
+#define stepsPerRev (200*4) // quarter step
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,6 +54,7 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim8;
 
 UART_HandleTypeDef huart3;
 
@@ -71,21 +73,24 @@ static void MX_TIM2_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_TIM8_Init(void);
 /* USER CODE BEGIN PFP */
 static void delay_us(uint16_t us);
-static void calcObjDist(uint32_t totalTime);
+static void calcObjDist(uint32_t totalTime, uint8_t sensorNumber);
 static void sensorRoutine();
 static void sentryFireRoutine();
+static void stepper_step_angle(float angle, float rpm, uint8_t direction);
+static void step();
 static void getSineVal();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int firstCaptured = 0;
-uint32_t totalTimeOne = 0;
+uint8_t leftSensorFirstCapt = 0, centerSensorFirstCapt = 0, rightSensorFirstCapt = 0;
+uint32_t totalTimeLeft = 0, totalTimeCenter = 0, totalTimeRight = 0;
 int32_t totalFinal = 0;
 int velSound = 34300; // in cm/s
-int distance = 0;
+int distanceLeft = 0, distanceCenter = 0, distanceRight = 0;
 
 float startVolt = 0.5;
 uint16_t samples = 16;
@@ -93,19 +98,37 @@ uint32_t sineVal[16];
 
 uint8_t bufRec[256];
 
-
 void delay_us(uint16_t us){
 	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
 	while(__HAL_TIM_GET_COUNTER(&htim3) < us);
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
+	/* Left Sensor */
 	if(htim == &htim1 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1){
-		if(firstCaptured == 0) firstCaptured++;
-		else if(firstCaptured == 1){
-			totalTimeOne = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2); //Retrieves pulse width value from ultrasonic
-			calcObjDist(totalTimeOne);
-			firstCaptured--;
+		if(leftSensorFirstCapt == 0) leftSensorFirstCapt++;
+		else if(leftSensorFirstCapt == 1){
+			totalTimeLeft = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2); //Retrieves pulse width value from ultrasonic
+			calcObjDist(totalTimeLeft,0);
+			leftSensorFirstCapt--;
+		}
+	}
+	/* Center Sensor */
+	if(htim == &htim1 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3){
+		if(centerSensorFirstCapt == 0) centerSensorFirstCapt++;
+		else if(centerSensorFirstCapt == 1){
+			totalTimeCenter = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_4); //Retrieves pulse width value from ultrasonic
+			calcObjDist(totalTimeCenter,1);
+			centerSensorFirstCapt--;
+		}
+	}
+	/* Right Sensor */
+	if(htim == &htim8 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1){
+		if(rightSensorFirstCapt == 0) rightSensorFirstCapt++;
+		else if(rightSensorFirstCapt == 1){
+			totalTimeRight = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2); //Retrieves pulse width value from ultrasonic
+			calcObjDist(totalTimeRight,2);
+			rightSensorFirstCapt--;
 		}
 	}
 }
@@ -118,15 +141,30 @@ void HAL_USART_RxCpltCallback(UART_HandleTypeDef *husart){
 	}
 }
 
-void calcObjDist(uint32_t totalTime){
+void calcObjDist(uint32_t totalTime, uint8_t sensorNumber){
 	totalFinal = totalTime/2;
-	distance = totalFinal * velSound * pow(10,-6);
+	switch(sensorNumber){
+		case 0: // Left sensor
+			distanceLeft = totalFinal * velSound * pow(10,-6);
+			break;
+		case 1: // Center sensor
+			distanceCenter = totalFinal * velSound * pow(10,-6);
+			break;
+		case 2: // Right sensor
+			distanceRight = totalFinal * velSound * pow(10,-6);
+			break;
+	}
+
 }
 
 void sensorRoutine(){
-	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9, GPIO_PIN_SET); // Left sensor
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10, GPIO_PIN_SET); // Center sensor
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_SET); // Right sensor
 	delay_us(10);
-	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9, GPIO_PIN_RESET); // Left sensor
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10, GPIO_PIN_RESET); // Center sensor
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_RESET); // Right sensor
 	HAL_Delay(100);
 }
 
@@ -145,83 +183,28 @@ void getSineVal(){
 	}
 }
 
-#define stepsPerRev 200
-
 void stepper_set_rpm(float rpm){
 	delay_us(60000000/stepsPerRev/rpm);
 }
 
-void full_step(int step){
-	/*switch(step){
-	case 0:
-		//1010
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_RESET);
-		break;
-	case 1:
-		//0110
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_RESET);
-		break;
-	case 2:
-		//0101
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET);
-		break;
-	case 3:
-		//1001
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET);
-		break;
-	}*/
-	switch(step){
-		case 2:
-			//1010
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_SET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_RESET);
-			break;
-		case 3:
-			//0110
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_SET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_RESET);
-			break;
-		case 0:
-			//0101
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET);
-			break;
-		case 1:
-			//1001
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_10, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_11, GPIO_PIN_SET);
-			break;
-		}
-
-	//AA!BB!
+void step(){ // A4988 Step pin
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
+	delay_us(1);
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
 }
 
-void stepper_step_angle(float angle, float rpm){
-	float anglePerStep = 1.8*4; // For some reason, multiply by 4
+void stepper_step_angle(float angle, float rpm, uint8_t direction){
+	float anglePerStep = 1.8/4; // Quarter step
 	int numOfSteps = (int) (angle/anglePerStep);
 	for(int i = 0; i < numOfSteps; i++){
-		for(int j = 0; j < 4; j++){
-			full_step(j);
+		if(direction == 0) {// Clockwise
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
+			step();
+			stepper_set_rpm(rpm);
+		}
+		if(direction == 1) {// Counter Clockwise
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
+			step();
 			stepper_set_rpm(rpm);
 		}
 	}
@@ -286,6 +269,7 @@ int main(void)
   MX_SPI1_Init();
   MX_USART3_UART_Init();
   MX_TIM4_Init();
+  MX_TIM8_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
@@ -305,10 +289,28 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
+	  stepper_step_angle(90,7.5,0);
+	  HAL_Delay(150);
+	  stepper_step_angle(90,7.5,1);
+	  sensorRoutine();
+	  // Sentry responds when object within 30cm/12in
+	  /*if(distanceLeft < 22 && distanceLeft < distanceCenter && distanceLeft < distanceRight){
+		  stepper_step_angle(45,15,1); // Turn left 45, at a rate of 15 RPM
+		  sentryFireRoutine();
+		  stepper_step_angle(45,7.5,0); // Return to last position
+	  }
+	  if(distanceCenter < 22 && distanceCenter < distanceLeft && distanceCenter < distanceRight){
+		  stepper_step_angle(45,15); // Turn 45, at a rate of 15 RPM
+		  sentryFireRoutine();
+	  }
+	  if(distanceRight < 22 && distanceRight < distanceCenter && distanceRight < distanceLeft){
+		  stepper_step_angle(45,15,0); // Turn right 45, at a rate of 15 RPM
+		  sentryFireRoutine();
+		  stepper_step_angle(45,7.5,1); // Return to last position
+	  }
 	  uint8_t buffer[] = "hello";
 	  HAL_UART_Transmit(&huart3,buffer,sizeof(buffer),HAL_MAX_DELAY);
-	  HAL_UART_Receive_IT(&huart3,bufRec,sizeof(bufRec));
+	  HAL_UART_Receive_IT(&huart3,bufRec,sizeof(bufRec));*/
 
     /* USER CODE END WHILE */
 
@@ -511,6 +513,18 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  if (HAL_TIM_IC_ConfigChannel(&htim1, &sConfigIC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
+  if (HAL_TIM_IC_ConfigChannel(&htim1, &sConfigIC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM1_Init 2 */
 
   /* USER CODE END TIM1_Init 2 */
@@ -667,6 +681,81 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+  * @brief TIM8 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM8_Init(void)
+{
+
+  /* USER CODE BEGIN TIM8_Init 0 */
+
+  /* USER CODE END TIM8_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
+
+  /* USER CODE BEGIN TIM8_Init 1 */
+
+  /* USER CODE END TIM8_Init 1 */
+  htim8.Instance = TIM8;
+  htim8.Init.Prescaler = 2-1;
+  htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim8.Init.Period = 65535;
+  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim8.Init.RepetitionCounter = 0;
+  htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim8, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_IC_Init(&htim8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
+  sSlaveConfig.InputTrigger = TIM_TS_TI1FP1;
+  sSlaveConfig.TriggerPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sSlaveConfig.TriggerFilter = 0;
+  if (HAL_TIM_SlaveConfigSynchro(&htim8, &sSlaveConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
+  sConfigIC.ICFilter = 0;
+  if (HAL_TIM_IC_ConfigChannel(&htim8, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
+  if (HAL_TIM_IC_ConfigChannel(&htim8, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM8_Init 2 */
+
+  /* USER CODE END TIM8_Init 2 */
+
+}
+
+/**
   * @brief USART3 Initialization Function
   * @param None
   * @retval None
@@ -741,19 +830,16 @@ static void MX_GPIO_Init(void)
                           |GPIO_PIN_11, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|LD2_Pin|GPIO_PIN_8, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOF, GPIO_PIN_13, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : USER_Btn_Pin */
   GPIO_InitStruct.Pin = USER_Btn_Pin;
@@ -767,13 +853,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PA1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA3 */
   GPIO_InitStruct.Pin = GPIO_PIN_3;
@@ -795,8 +874,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PD11 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11;
+  /*Configure GPIO pins : PD9 PD10 PD11 */
+  GPIO_InitStruct.Pin = GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
