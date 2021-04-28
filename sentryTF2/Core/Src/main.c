@@ -22,9 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "testSound.h"
+//#include "testSound.h"
 #include "math.h"
 #include "string.h"
+
+#include "spotClient.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,7 +55,7 @@ SPI_HandleTypeDef hspi1;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
-TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim8;
 
 UART_HandleTypeDef huart3;
@@ -72,8 +74,8 @@ static void MX_DAC_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
-static void MX_TIM4_Init(void);
 static void MX_TIM8_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 static void delay_us(uint16_t us);
 static void calcObjDist(uint32_t totalTime, uint8_t sensorNumber);
@@ -93,10 +95,8 @@ int velSound = 34300; // in cm/s
 int distanceLeft = 0, distanceCenter = 0, distanceRight = 0;
 
 float startVolt = 0.5;
-uint16_t samples = 16;
-uint32_t sineVal[16];
-
-uint8_t bufRec[256];
+uint16_t samples = 22454;
+uint32_t sineVal[22454];
 
 void delay_us(uint16_t us){
 	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
@@ -130,14 +130,6 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
 			calcObjDist(totalTimeRight,2);
 			rightSensorFirstCapt--;
 		}
-	}
-}
-
-void HAL_USART_RxCpltCallback(UART_HandleTypeDef *husart){
-	if(husart == &huart3){
-	  if(strstr(bufRec,"hello")){
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-	  }
 	}
 }
 
@@ -210,27 +202,22 @@ void stepper_step_angle(float angle, float rpm, uint8_t direction){
 	}
 }
 
-#define _AMP(x) ( x / 2 )
-const size_t SINE_SAMPLES = 32;
-const uint16_t SINE_WAVE[] = {
-  _AMP(2048), _AMP(2447), _AMP(2831), _AMP(3185),
-  _AMP(3495), _AMP(3750), _AMP(3939), _AMP(4056),
-  _AMP(4095), _AMP(4056), _AMP(3939), _AMP(3750),
-  _AMP(3495), _AMP(3185), _AMP(2831), _AMP(2447),
-  _AMP(2048), _AMP(1649), _AMP(1265), _AMP(911),
-  _AMP(601),  _AMP(346),  _AMP(157),  _AMP(40),
-  _AMP(0),    _AMP(40),   _AMP(157),  _AMP(346),
-  _AMP(601),  _AMP(911),  _AMP(1265), _AMP(1649)
-};
+/* My UART functions below and in the interrupt handler write directly to the registers because I struggled with the HAL functions and read online that
+ * the HAL UART functions are not that great and most people seem to say just write your own.
+ */
+void UART3_TransferChar(char c){
+	USART3->CR1 |= 1 << 3; //Set TE to 1t
+	USART3->TDR = c;
+	while(!(USART3->ISR & (1<<6))); // Wait for TC bit
+	USART3->CR1 &= ~(1<<3); //Set TE to 0
+}
 
-/*uint16_t testWav[] = {0x07ff, 0x083f, 0x087e, 0x08be, 0x08fc,
-		0x093a, 0x0976, 0x09b1, 0x09ea, 0x0a22, 0x0a57, 0x0a89,
-		0x0aba, 0x0ae7, 0x0b11, 0x0b39, 0x0b5d, 0x0b7e, 0x0b9b,
-		0x0bb5, 0x0bcb, 0x0bdd, 0x0beb, 0x0bf5, 0x0bfb, 0x0bfd,
-		0x0bfc, 0x0bf6, 0x0bec, 0x0bde, 0x0bcd, 0x0bb7,
-		0x0b9e, 0x097d, 0x0941, 0x0903, 0x08c5, 0x0886, 0x0846,
+void UART3_TransferString(char str[]){
+	for(int i = 0; i < strlen(str); i++){
+		UART3_TransferChar(str[i]);
+	}
+}
 
-};*/
 /* USER CODE END 0 */
 
 /**
@@ -268,20 +255,22 @@ int main(void)
   MX_TIM2_Init();
   MX_SPI1_Init();
   MX_USART3_UART_Init();
-  MX_TIM4_Init();
   MX_TIM8_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
   HAL_TIM_Base_Start(&htim3);
 
   getSineVal();
-  HAL_TIM_Base_Start(&htim4);
-  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
-  HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, sineVal, samples, DAC_ALIGN_12B_R);
+  HAL_TIM_Base_Start(&htim6);
+ // HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+  //HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, data, NUM_ELEMENTS, DAC_ALIGN_12B_R);
 
   //HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
+  USART3->CR1 |= (1<<5); // Enable Receive Data Interrupt
+  //USART3->CR1 |= (1<<7); // Enable Transfer Data Interrupt
 
   /* USER CODE END 2 */
 
@@ -289,10 +278,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  stepper_step_angle(90,7.5,0);
+
+	  /*stepper_step_angle(90,7.5,0);
 	  HAL_Delay(150);
 	  stepper_step_angle(90,7.5,1);
-	  sensorRoutine();
+	  sensorRoutine();*/
+
 	  // Sentry responds when object within 30cm/12in
 	  /*if(distanceLeft < 22 && distanceLeft < distanceCenter && distanceLeft < distanceRight){
 		  stepper_step_angle(45,15,1); // Turn left 45, at a rate of 15 RPM
@@ -308,9 +299,7 @@ int main(void)
 		  sentryFireRoutine();
 		  stepper_step_angle(45,7.5,1); // Return to last position
 	  }
-	  uint8_t buffer[] = "hello";
-	  HAL_UART_Transmit(&huart3,buffer,sizeof(buffer),HAL_MAX_DELAY);
-	  HAL_UART_Receive_IT(&huart3,bufRec,sizeof(bufRec));*/
+*/
 
     /* USER CODE END WHILE */
 
@@ -339,7 +328,12 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 80;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 5;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -348,12 +342,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV16;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV16;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -392,7 +386,7 @@ static void MX_DAC_Init(void)
   }
   /** DAC channel OUT1 config
   */
-  sConfig.DAC_Trigger = DAC_TRIGGER_T4_TRGO;
+  sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
   sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
   if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
   {
@@ -636,47 +630,40 @@ static void MX_TIM3_Init(void)
 }
 
 /**
-  * @brief TIM4 Initialization Function
+  * @brief TIM6 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM4_Init(void)
+static void MX_TIM6_Init(void)
 {
 
-  /* USER CODE BEGIN TIM4_Init 0 */
+  /* USER CODE BEGIN TIM6_Init 0 */
 
-  /* USER CODE END TIM4_Init 0 */
+  /* USER CODE END TIM6_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM4_Init 1 */
+  /* USER CODE BEGIN TIM6_Init 1 */
 
-  /* USER CODE END TIM4_Init 1 */
-  htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 0;
-  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 255;
-  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 80-1;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 100-1;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN TIM4_Init 2 */
+  /* USER CODE BEGIN TIM6_Init 2 */
 
-  /* USER CODE END TIM4_Init 2 */
+  /* USER CODE END TIM6_Init 2 */
 
 }
 

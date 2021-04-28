@@ -59,6 +59,7 @@
 extern DMA_HandleTypeDef hdma_dac1;
 extern DAC_HandleTypeDef hdac;
 extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim6;
 extern UART_HandleTypeDef huart3;
 /* USER CODE BEGIN EV */
 
@@ -250,14 +251,18 @@ void TIM1_CC_IRQHandler(void)
 void USART3_IRQHandler(void)
 {
   /* USER CODE BEGIN USART3_IRQn 0 */
-
+	// Interrupt was because of a transfer?
   /* USER CODE END USART3_IRQn 0 */
   HAL_UART_IRQHandler(&huart3);
   /* USER CODE BEGIN USART3_IRQn 1 */
-  int result;
-  result = strcmp(bufRec, "hello");
-  if(result == 0){
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+  if(USART3->ISR & (1<<5)){   // Interrupt was because of a receive
+	  uint8_t c;
+	  c = USART3->RDR; // Clears RXNE?
+	  USART3->CR1 &= ~(1 << 2); // Clear RE to finish receive
+	  if(c == 'c'){
+		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+	  }
+	  USART3->CR1 |= 1 << 2; // Set RE to be ready to receive again
   }
   /* USER CODE END USART3_IRQn 1 */
 }
@@ -285,6 +290,7 @@ void TIM6_DAC_IRQHandler(void)
 
   /* USER CODE END TIM6_DAC_IRQn 0 */
   HAL_DAC_IRQHandler(&hdac);
+  HAL_TIM_IRQHandler(&htim6);
   /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
 
   /* USER CODE END TIM6_DAC_IRQn 1 */
