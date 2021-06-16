@@ -22,11 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-//#include "testSound.h"
 #include "math.h"
 #include "string.h"
-
-#include "spotClient.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,10 +47,7 @@
 DAC_HandleTypeDef hdac;
 DMA_HandleTypeDef hdma_dac1;
 
-SPI_HandleTypeDef hspi1;
-
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim8;
@@ -71,8 +65,6 @@ static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_DAC_Init(void);
-static void MX_TIM2_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_TIM6_Init(void);
@@ -83,6 +75,7 @@ static void sensorRoutine();
 static void sentryFireRoutine();
 static void stepper_step_angle(float angle, float rpm, uint8_t direction);
 static void step();
+static void playAudio(uint8_t audioTrack);
 static void getSineVal();
 /* USER CODE END PFP */
 
@@ -94,9 +87,20 @@ int32_t totalFinal = 0;
 int velSound = 34300; // in cm/s
 int distanceLeft = 0, distanceCenter = 0, distanceRight = 0;
 
-float startVolt = 0.5;
-uint16_t samples = 22454;
-uint32_t sineVal[22454];
+uint16_t samples = 100;
+uint32_t sineVal[100];
+
+int count = 0;
+uint8_t *tempPointer_DAC; // 8 bit data, so 8 bit pointer
+extern uint8_t *__SENTRY_SHOOT, *__SENTRY_SPOT, *__SENTRY_SCAN;
+int sentryShoot_wavSize = 62330;
+int sentrySpot_wavSize = 29764;
+int sentryScan_wavSize = 35396;
+uint8_t *sentryShootWavPointer = (uint8_t*)&__SENTRY_SHOOT;
+uint8_t *sentrySpotWavPointer = (uint8_t*)&__SENTRY_SPOT;
+uint8_t *sentryScantWavPointer = (uint8_t*)&__SENTRY_SCAN;
+uint16_t volatile wavBuffer[512];
+
 
 void delay_us(uint16_t us){
 	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
@@ -163,10 +167,38 @@ void sensorRoutine(){
 void sentryFireRoutine(){
   for(int i = 0; i < 12; i++){
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_8);
+	  playAudio(3); // Play sentry Fire sound
 	  HAL_Delay(10);
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_8);
-	  HAL_Delay(240);
+	  HAL_Delay(10);
+	  //HAL_Delay(240);
   }
+}
+
+void playAudio(uint8_t audioTrack){
+	switch(audioTrack){
+		case 1: // sentry scan sound
+			tempPointer_DAC = (uint8_t *)sentryScantWavPointer;
+			count = sentryScan_wavSize;
+			break;
+		case 2: // sentry spot client sound
+			tempPointer_DAC = (uint8_t *)sentrySpotWavPointer;
+			count = sentrySpot_wavSize;
+			break;
+		case 3: // sentry firing sound
+			tempPointer_DAC = (uint8_t *)sentryShootWavPointer;
+			count = sentryShoot_wavSize;
+			break;
+	}
+	for(int i = 0; i < 512; i++){
+		wavBuffer[i] = *tempPointer_DAC << 4;
+		tempPointer_DAC++;
+	}
+	count -= 512;
+	while(count > 0){
+		HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)wavBuffer, 512, DAC_ALIGN_12B_R);
+	}
+	HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
 }
 
 void getSineVal(){
@@ -252,8 +284,6 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM3_Init();
   MX_DAC_Init();
-  MX_TIM2_Init();
-  MX_SPI1_Init();
   MX_USART3_UART_Init();
   MX_TIM8_Init();
   MX_TIM6_Init();
@@ -264,42 +294,44 @@ int main(void)
 
   getSineVal();
   HAL_TIM_Base_Start(&htim6);
- // HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
-  //HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, data, NUM_ELEMENTS, DAC_ALIGN_12B_R);
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
 
   //HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
   USART3->CR1 |= (1<<5); // Enable Receive Data Interrupt
   //USART3->CR1 |= (1<<7); // Enable Transfer Data Interrupt
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-	  /*stepper_step_angle(90,7.5,0);
+	  playAudio(1); // Scanning sound
+	  stepper_step_angle(90,7.5,0); // Turn
+	  playAudio(1); // Scanning sound
 	  HAL_Delay(150);
-	  stepper_step_angle(90,7.5,1);
-	  sensorRoutine();*/
+	  stepper_step_angle(90,7.5,1); // Turn
+	  sensorRoutine();
 
 	  // Sentry responds when object within 30cm/12in
-	  /*if(distanceLeft < 22 && distanceLeft < distanceCenter && distanceLeft < distanceRight){
+	  if(distanceLeft < 22 && distanceLeft < distanceCenter && distanceLeft < distanceRight){
+	   	  playAudio(2); // Spotted client sound
 		  stepper_step_angle(45,15,1); // Turn left 45, at a rate of 15 RPM
 		  sentryFireRoutine();
 		  stepper_step_angle(45,7.5,0); // Return to last position
 	  }
 	  if(distanceCenter < 22 && distanceCenter < distanceLeft && distanceCenter < distanceRight){
-		  stepper_step_angle(45,15); // Turn 45, at a rate of 15 RPM
+	   	  playAudio(2); // Spotted client sound
+		  //stepper_step_angle(45,15); // Do not turn, stop movement.
 		  sentryFireRoutine();
 	  }
 	  if(distanceRight < 22 && distanceRight < distanceCenter && distanceRight < distanceLeft){
+	   	  playAudio(2); // Spotted client sound
 		  stepper_step_angle(45,15,0); // Turn right 45, at a rate of 15 RPM
 		  sentryFireRoutine();
 		  stepper_step_angle(45,7.5,1); // Return to last position
 	  }
-*/
+
 
     /* USER CODE END WHILE */
 
@@ -345,7 +377,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV16;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
@@ -399,46 +431,6 @@ static void MX_DAC_Init(void)
 }
 
 /**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 7;
-  hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
   * @brief TIM1 Initialization Function
   * @param None
   * @retval None
@@ -459,7 +451,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 2-1;
+  htim1.Init.Prescaler = 10-1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -526,65 +518,6 @@ static void MX_TIM1_Init(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 400-1;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 100-1;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
-
-}
-
-/**
   * @brief TIM3 Initialization Function
   * @param None
   * @retval None
@@ -603,7 +536,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 2-1;
+  htim3.Init.Prescaler = 80-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 65535-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -647,9 +580,9 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 80-1;
+  htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 100-1;
+  htim6.Init.Period = 1814-1;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -688,7 +621,7 @@ static void MX_TIM8_Init(void)
 
   /* USER CODE END TIM8_Init 1 */
   htim8.Instance = TIM8;
-  htim8.Init.Prescaler = 2-1;
+  htim8.Init.Prescaler = 10-1;
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim8.Init.Period = 65535;
   htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -907,6 +840,21 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef* hdac){
+	for(int i = 0; i < 255; i++){
+		wavBuffer[i] = *tempPointer_DAC << 4; // 12 bit data to increase volume
+		tempPointer_DAC++;
+	}
+}
+
+void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef* hdac){
+	for(int i = 255; i < 512; i++){
+		wavBuffer[i] = *tempPointer_DAC << 4;
+		tempPointer_DAC++;
+	}
+	count -= 512;
+}
 
 /* USER CODE END 4 */
 

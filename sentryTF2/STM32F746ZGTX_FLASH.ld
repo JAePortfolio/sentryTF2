@@ -37,8 +37,15 @@ _Min_Stack_Size = 0x400 ;	/* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 320K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 1024K
+  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 1024K - 63K - 30K - 36K
+  FLASH1    (rx)    : ORIGIN = 0x80F0000,   LENGTH = 63K
+  FLASH2    (rx)    : ORIGIN = 0x80FF37C,   LENGTH = 30K
+  FLASH3    (rx)    : ORIGIN = 0x81068AC,   LENGTH = 36K
 }
+
+__SENTRY_SHOOT = ORIGIN(FLASH1);
+__SENTRY_SPOT = ORIGIN(FLASH2);
+__SENTRY_SCAN = ORIGIN(FLASH3);
 
 /* Sections */
 SECTIONS
@@ -164,7 +171,28 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
+  
+  .sentry_shoot :  /* Audio data for the sentry shooting sound */
+  {
+  	. = ALIGN(4);
+  	KEEP(*(.sentry_shoot))
+  	. = ALIGN(4);
+  } > FLASH1
+    
+  .sentry_spot :  /* Audio data for the sentry spotting client sound */
+  {
+  	. = ALIGN(4);
+  	KEEP(*(.sentry_spot))
+  	. = ALIGN(4);
+  } > FLASH2
 
+  .sentry_scan :  /* Audio data for the sentry scanning sound */
+  {
+  	. = ALIGN(4);
+  	KEEP(*(.sentry_scan))
+  	. = ALIGN(4);
+  } > FLASH3
+  
   /* Remove information from the compiler libraries */
   /DISCARD/ :
   {
