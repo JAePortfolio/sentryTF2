@@ -12,4 +12,4 @@ stm32f7xx_it.c:223:6:DMA1_Stream5_IRQHandler	8	static
 stm32f7xx_it.c:237:6:TIM1_CC_IRQHandler	8	static
 stm32f7xx_it.c:251:6:USART3_IRQHandler	16	static
 stm32f7xx_it.c:273:6:EXTI15_10_IRQHandler	8	static
-stm32f7xx_it.c:287:6:TIM6_DAC_IRQHandler	8	static
+stm32f7xx_it.c:289:6:TIM6_DAC_IRQHandler	8	static
