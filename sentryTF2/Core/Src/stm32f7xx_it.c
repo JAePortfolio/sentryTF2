@@ -23,6 +23,8 @@
 #include "stm32f7xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdbool.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+bool sentryDestroyed = false;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -259,8 +261,13 @@ void USART3_IRQHandler(void)
 	  uint8_t c;
 	  c = USART3->RDR; // Clears RXNE?
 	  USART3->CR1 &= ~(1 << 2); // Clear RE to finish receive
-	  if(c == 'c'){
-		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+	  if(c == '4'){ // Tell STM to refill the ammo
+		  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+		  shells = 100;
+	  }
+	  if(c == '5') { // Sentry lost all HP from being sapped, "destroyed"
+		  sentryDestroyed = !sentryDestroyed;
+		  while(sentryDestroyed); // Sentry lost all hp, wait until reset
 	  }
 	  USART3->CR1 |= 1 << 2; // Set RE to be ready to receive again
   }

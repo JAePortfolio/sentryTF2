@@ -76,6 +76,7 @@ static void delay_us(uint16_t us);
 static void calcObjDist(uint32_t totalTime, uint8_t sensorNumber);
 static void sensorRoutine();
 static void sentryFireRoutine();
+static void sentrySapped();
 static void stepper_step_angle(float angle, float rpm, uint8_t direction);
 static void step();
 static void playAudio(uint8_t audioTrack);
@@ -92,6 +93,9 @@ int distanceLeft = 0, distanceCenter = 0, distanceRight = 0;
 
 uint16_t samples = 100;
 uint32_t sineVal[100];
+
+uint8_t sentryHealth = 100;
+extern uint8_t shells = 100;
 
 int count = 0;
 uint8_t *tempPointer_DAC; // 8 bit data, so 8 bit pointer
@@ -168,16 +172,28 @@ void sensorRoutine(){
 }
 
 void sentryFireRoutine(){
-  for(int i = 0; i < 12; i++){
-	  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_0);
-	  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_1);
-	  playAudio(3); // Play sentry Fire sound
-	  HAL_Delay(10);
-	  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_0);
-	  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_1);
-	  HAL_Delay(10);
-	  //HAL_Delay(240);
-  }
+	if(shells > 0){ // Ammo not empty
+		UART3_TransferChar('1'); // Tell PDA App the sentry is firing
+		shells =- 10;
+		for(int i = 0; i < 12; i++){
+		  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_0);
+		  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_1);
+		  playAudio(3); // Play sentry Fire sound
+		  HAL_Delay(10);
+		  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_0);
+		  HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_1);
+		  HAL_Delay(10);
+		  //HAL_Delay(240);
+		}
+	}
+	if(shells <= 0){
+		//playAudio(4); // Sentry out of shells firing sound
+	}
+}
+
+void sentrySapped(){
+	UART3_TransferChar('2'); // Tell PDA App the sentry has been sapped
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor
 }
 
 void playAudio(uint8_t audioTrack){
@@ -242,7 +258,7 @@ void stepper_step_angle(float angle, float rpm, uint8_t direction){
 void HAL_GPIO_EXTI_Callback (uint16_t GPIO_Pin){
 	if(GPIO_Pin = GPIO_PIN_10){
 		if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_RESET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_RESET){ // Hall sensors go low
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor
+			sentrySapped();
 		}
 		else if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_SET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_SET){ // Hall sensors go back to high
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor

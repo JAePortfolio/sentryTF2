@@ -69,6 +69,7 @@ void Error_Handler(void);
 #define LD2_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 extern uint8_t bufRec[256];
+extern uint8_t shells;
 
 /* USER CODE END Private defines */
 
