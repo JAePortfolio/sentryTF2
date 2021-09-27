@@ -33,13 +33,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define PI 3.1415926
-#define stepsPerRev (200*4) // quarter step
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#define PI 3.1415926
+#define stepsPerRev (200*4) // quarter step
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -76,7 +76,7 @@ static void delay_us(uint16_t us);
 static void calcObjDist(uint32_t totalTime, uint8_t sensorNumber);
 static void sensorRoutine();
 static void sentryFireRoutine();
-static void sentrySapped();
+static void sentrySapped(uint8_t status);
 static void stepper_step_angle(float angle, float rpm, uint8_t direction);
 static void step();
 static void playAudio(uint8_t audioTrack);
@@ -85,6 +85,7 @@ static void getSineVal();
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* ----------------- Ultrasonic sensor variables ------------------- */
 uint8_t leftSensorFirstCapt = 0, centerSensorFirstCapt = 0, rightSensorFirstCapt = 0;
 uint32_t totalTimeLeft = 0, totalTimeCenter = 0, totalTimeRight = 0;
 int32_t totalFinal = 0;
@@ -94,9 +95,11 @@ int distanceLeft = 0, distanceCenter = 0, distanceRight = 0;
 uint16_t samples = 100;
 uint32_t sineVal[100];
 
+/* ----------------- Sentry stats variables ------------------- */
 uint8_t sentryHealth = 100;
 extern uint8_t shells = 100;
 
+/* ----------------- Audio variables ------------------- */
 int count = 0;
 uint8_t *tempPointer_DAC; // 8 bit data, so 8 bit pointer
 extern uint8_t *__SENTRY_SHOOT, *__SENTRY_SPOT, *__SENTRY_SCAN;
@@ -105,13 +108,19 @@ int sentrySpot_wavSize = 29764;
 int sentryScan_wavSize = 35396;
 uint8_t *sentryShootWavPointer = (uint8_t*)&__SENTRY_SHOOT;
 uint8_t *sentrySpotWavPointer = (uint8_t*)&__SENTRY_SPOT;
-uint8_t *sentryScantWavPointer = (uint8_t*)&__SENTRY_SCAN;
+uint8_t *sentryScanWavPointer = (uint8_t*)&__SENTRY_SCAN;
 uint16_t volatile wavBuffer[512];
 
 
 void delay_us(uint16_t us){
 	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
 	while(__HAL_TIM_GET_COUNTER(&htim3) < us);
+}
+
+void getSineVal(){
+	for(int i = 0; i < samples; i++){
+		sineVal[i] = (sin(2*i*PI/samples)+1)*((0xFFF+1)/2);
+	}
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
@@ -164,7 +173,7 @@ void sensorRoutine(){
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9, GPIO_PIN_SET); // Left sensor
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10, GPIO_PIN_SET); // Center sensor
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_SET); // Right sensor
-	delay_us(10);
+	delay_us(100);
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_9, GPIO_PIN_RESET); // Left sensor
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_10, GPIO_PIN_RESET); // Center sensor
 	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_RESET); // Right sensor
@@ -191,15 +200,33 @@ void sentryFireRoutine(){
 	}
 }
 
-void sentrySapped(){
-	UART3_TransferChar('2'); // Tell PDA App the sentry has been sapped
-	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor
+void sentrySapped(uint8_t status){
+	if(status == 0){
+		UART3_TransferChar('3'); // Tell PDA App the sentry has been unsapped
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will disable motor
+	}
+	else{
+		UART3_TransferChar('2'); // Tell PDA App the sentry has been sapped
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor
+	}
+}
+
+void HAL_GPIO_EXTI_Callback (uint16_t GPIO_Pin){
+	if(GPIO_Pin = GPIO_PIN_10){
+		if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_RESET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_RESET){ // Hall sensors go low
+			sentrySapped(1);
+		}
+		else if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_SET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_SET){ // Hall sensors go back to high
+			sentrySapped(0);
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor
+		}
+	}
 }
 
 void playAudio(uint8_t audioTrack){
 	switch(audioTrack){
 		case 1: // sentry scan sound
-			tempPointer_DAC = (uint8_t *)sentryScantWavPointer;
+			tempPointer_DAC = (uint8_t *)sentryScanWavPointer;
 			count = sentryScan_wavSize;
 			break;
 		case 2: // sentry spot client sound
@@ -220,12 +247,6 @@ void playAudio(uint8_t audioTrack){
 		HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)wavBuffer, 512, DAC_ALIGN_12B_R);
 	}
 	HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
-}
-
-void getSineVal(){
-	for(int i = 0; i < samples; i++){
-		sineVal[i] = (sin(2*i*PI/samples)+1)*((0xFFF+1)/2);
-	}
 }
 
 void stepper_set_rpm(float rpm){
@@ -255,16 +276,6 @@ void stepper_step_angle(float angle, float rpm, uint8_t direction){
 	}
 }
 
-void HAL_GPIO_EXTI_Callback (uint16_t GPIO_Pin){
-	if(GPIO_Pin = GPIO_PIN_10){
-		if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_RESET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_RESET){ // Hall sensors go low
-			sentrySapped();
-		}
-		else if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_SET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_SET){ // Hall sensors go back to high
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor
-		}
-	}
-}
 
 /* My UART functions below and in the interrupt handler write directly to the registers because I struggled with the HAL functions and read online that
  * the HAL UART functions are not that great and most people seem to say just write your own.
@@ -323,11 +334,16 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
   HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
+  HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_3);
+  HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_4);
+  HAL_TIM_IC_Start_IT(&htim8, TIM_CHANNEL_1);
+  HAL_TIM_IC_Start_IT(&htim8, TIM_CHANNEL_2);
   HAL_TIM_Base_Start(&htim3);
 
   getSineVal();
-  HAL_TIM_Base_Start(&htim6);
   HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+  HAL_TIM_Base_Start(&htim6);
+  //HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, sineVal, 100, DAC_ALIGN_12B_R);
 
   //HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
@@ -339,11 +355,23 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+//	  HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_3);
+//	  delay_us(10);
+
+//	  sensorRoutine();
+//	  HAL_Delay(150);
+//	  if(distanceLeft < 5){
+//		  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, 1);
+//	  }
+//	  else HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, 0);
+	  //playAudio(1);
+	  //HAL_Delay(1000);
+	  //playAudio(2);
+	  //playAudio(3); // shoot sound
+	  //stepper_step_angle(90,7.5,0); // Turn
 	  //playAudio(1); // Scanning sound
-	  stepper_step_angle(90,7.5,0); // Turn
-	  //playAudio(1); // Scanning sound
-	  HAL_Delay(150);
-	  stepper_step_angle(90,7.5,1); // Turn
+	  //HAL_Delay(150);
+	  //stepper_step_angle(90,15,1); // Turn
 	  //sensorRoutine();
 
 	  // Sentry responds when object within 30cm/12in
@@ -486,7 +514,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 10-1;
+  htim1.Init.Prescaler = 72-1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -571,7 +599,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 80-1;
+  htim3.Init.Prescaler = 72-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 65535-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -617,7 +645,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 1814-1;
+  htim6.Init.Period = 816-1;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -656,7 +684,7 @@ static void MX_TIM8_Init(void)
 
   /* USER CODE END TIM8_Init 1 */
   htim8.Instance = TIM8;
-  htim8.Init.Prescaler = 10-1;
+  htim8.Init.Prescaler = 72-1;
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim8.Init.Period = 65535;
   htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
