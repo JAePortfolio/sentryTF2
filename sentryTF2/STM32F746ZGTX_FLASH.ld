@@ -37,16 +37,18 @@ _Min_Stack_Size = 0x400 ;	/* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 320K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 1024K - 63K - 30K - 36K
+  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 1024K - 63K - 30K - 36K - 3K
   /* The audio data is stored starting from using sector 7 of the device, using addresses based on ICTM */
-  FLASH1    (rx)    : ORIGIN = 0x2E0817,   LENGTH = 63K
-  FLASH2    (rx)    : ORIGIN = 0x2EFE2F,   LENGTH = 30K
-  FLASH3    (rx)    : ORIGIN = 0x2F735F,   LENGTH = 36K
+  FLASH1    (rx)    : ORIGIN = 0x2DFC5F,   LENGTH = 63K
+  FLASH2    (rx)    : ORIGIN = 0x2EF277,   LENGTH = 30K
+  FLASH3    (rx)    : ORIGIN = 0x2F67A7,   LENGTH = 36K
+  FLASH4    (rx)    : ORIGIN = 0x2FF447,   LENGTH = 3K
 }
 
 __SENTRY_SHOOT = ORIGIN(FLASH1);
 __SENTRY_SPOT = ORIGIN(FLASH2);
 __SENTRY_SCAN = ORIGIN(FLASH3);
+__SENTRY_EMPTY = ORIGIN(FLASH4);
 
 /* Sections */
 SECTIONS
@@ -194,6 +196,13 @@ SECTIONS
   	KEEP(*(.sentry_scan))
   	. = ALIGN(4);
   } > FLASH3
+  
+    .sentry_empty :  /* Audio data for the sentry empty clip sound */
+  {
+  	. = ALIGN(4);
+  	KEEP(*(.sentry_empty))
+  	. = ALIGN(4);
+  } > FLASH4
   
   /* Remove information from the compiler libraries */
   /DISCARD/ :

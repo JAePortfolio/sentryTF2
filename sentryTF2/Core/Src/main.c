@@ -80,7 +80,7 @@ static void sentrySapped(uint8_t status);
 static void stepper_step_angle(float angle, float rpm, uint8_t direction);
 static void step();
 static void playAudio(uint8_t audioTrack);
-static void getSineVal();
+//static void getSineVal(); Use to test DAC
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -92,9 +92,6 @@ int32_t totalFinal = 0;
 int velSound = 34300; // in cm/s
 int distanceLeft = 0, distanceCenter = 0, distanceRight = 0;
 
-uint16_t samples = 100;
-uint32_t sineVal[100];
-
 /* ----------------- Sentry stats variables ------------------- */
 uint8_t sentryHealth = 100;
 extern uint8_t shells = 100;
@@ -102,25 +99,31 @@ extern uint8_t shells = 100;
 /* ----------------- Audio variables ------------------- */
 int count = 0;
 uint8_t *tempPointer_DAC; // 8 bit data, so 8 bit pointer
-extern uint8_t *__SENTRY_SHOOT, *__SENTRY_SPOT, *__SENTRY_SCAN;
+extern uint8_t *__SENTRY_SHOOT, *__SENTRY_SPOT, *__SENTRY_SCAN, *__SENTRY_EMPTY;
 int sentryShoot_wavSize = 62330;
 int sentrySpot_wavSize = 29764;
 int sentryScan_wavSize = 35396;
+int sentryEmpty_wavSize = 2678;
 uint8_t *sentryShootWavPointer = (uint8_t*)&__SENTRY_SHOOT;
 uint8_t *sentrySpotWavPointer = (uint8_t*)&__SENTRY_SPOT;
 uint8_t *sentryScanWavPointer = (uint8_t*)&__SENTRY_SCAN;
+uint8_t *sentryEmptyWavPointer = (uint8_t*)&__SENTRY_EMPTY;
 uint16_t volatile wavBuffer[512];
 
+/* ----------------- Use to test DAC ------------------- */
+//uint16_t samples = 100;
+//uint32_t sineVal[100];
 
-void delay_us(uint16_t us){
-	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
-	while(__HAL_TIM_GET_COUNTER(&htim3) < us);
-}
-
-void getSineVal(){
+/*void getSineVal(){ // Use to test DAC
 	for(int i = 0; i < samples; i++){
 		sineVal[i] = (sin(2*i*PI/samples)+1)*((0xFFF+1)/2);
 	}
+}*/
+
+
+void delay_us(uint16_t us){ // Delay microseconds
+	__HAL_TIM_SET_COUNTER(&htim3,0); // Set counter start to 0
+	while(__HAL_TIM_GET_COUNTER(&htim3) < us);
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
@@ -196,14 +199,14 @@ void sentryFireRoutine(){
 		}
 	}
 	if(shells <= 0){
-		//playAudio(4); // Sentry out of shells firing sound
+		playAudio(4); // Sentry out of shells firing sound
 	}
 }
 
 void sentrySapped(uint8_t status){
 	if(status == 0){
 		UART3_TransferChar('3'); // Tell PDA App the sentry has been unsapped
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will disable motor
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor
 	}
 	else{
 		UART3_TransferChar('2'); // Tell PDA App the sentry has been sapped
@@ -212,7 +215,7 @@ void sentrySapped(uint8_t status){
 }
 
 void HAL_GPIO_EXTI_Callback (uint16_t GPIO_Pin){
-	if(GPIO_Pin = GPIO_PIN_10){
+	if(GPIO_Pin == GPIO_PIN_10){
 		if(HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_10) == GPIO_PIN_RESET && HAL_GPIO_ReadPin(GPIOG, GPIO_PIN_11) == GPIO_PIN_RESET){ // Hall sensors go low
 			sentrySapped(1);
 		}
@@ -237,6 +240,9 @@ void playAudio(uint8_t audioTrack){
 			tempPointer_DAC = (uint8_t *)sentryShootWavPointer;
 			count = sentryShoot_wavSize;
 			break;
+		case 4: // sentry empty clip sound
+			tempPointer_DAC = (uint8_t *)sentryEmptyWavPointer;
+			count = sentryEmpty_wavSize;
 	}
 	for(int i = 0; i < 512; i++){
 		wavBuffer[i] = *tempPointer_DAC << 4;
@@ -340,60 +346,51 @@ int main(void)
   HAL_TIM_IC_Start_IT(&htim8, TIM_CHANNEL_2);
   HAL_TIM_Base_Start(&htim3);
 
-  getSineVal();
+  //getSineVal(); Use to test DAC with sine function
   HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
   HAL_TIM_Base_Start(&htim6);
-  //HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, sineVal, 100, DAC_ALIGN_12B_R);
+  //HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, sineVal, 100, DAC_ALIGN_12B_R); Use to test DAC with sine function
 
-  //HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
   USART3->CR1 |= (1<<5); // Enable Receive Data Interrupt
   //USART3->CR1 |= (1<<7); // Enable Transfer Data Interrupt
+
+
+  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, GPIO_PIN_SET); // Board Status LED
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_3);
-//	  delay_us(10);
+	  /* ---- Set the sentry's angle, RPM and direction. Have sensors active ---- */
+	  stepper_step_angle(90,7.5,1); // 90 degree rotation at 7.5 RPM, to the left
+	  stepper_step_angle(90,7.5,0); // 90 degree rotation at 7.5 RPM, to the right
+	  sensorRoutine();
 
-//	  sensorRoutine();
-//	  HAL_Delay(150);
-//	  if(distanceLeft < 5){
-//		  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, 1);
-//	  }
-//	  else HAL_GPIO_WritePin(GPIOG, GPIO_PIN_3, 0);
-	  //playAudio(1);
-	  //HAL_Delay(1000);
-	  //playAudio(2);
-	  //playAudio(3); // shoot sound
-	  //stepper_step_angle(90,7.5,0); // Turn
-	  //playAudio(1); // Scanning sound
-	  //HAL_Delay(150);
-	  //stepper_step_angle(90,15,1); // Turn
-	  //sensorRoutine();
-
-	  // Sentry responds when object within 30cm/12in
-	  /*if(distanceLeft < 22 && distanceLeft < distanceCenter && distanceLeft < distanceRight){
+	  /* ----------------------- Sentry responds when object within approx. 15-16cm/6in --------------------------- */
+	  if(distanceLeft < 16 && distanceLeft < distanceCenter && distanceLeft < distanceRight){
 	   	  playAudio(2); // Spotted client sound
 		  stepper_step_angle(45,15,1); // Turn left 45, at a rate of 15 RPM
+	   	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor so it stops moving
 		  sentryFireRoutine();
+	   	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor after sentryFireRoutine returns
 		  stepper_step_angle(45,7.5,0); // Return to last position
 	  }
-	  if(distanceCenter < 22 && distanceCenter < distanceLeft && distanceCenter < distanceRight){
+	  if(distanceCenter < 16 && distanceCenter < distanceLeft && distanceCenter < distanceRight){
 	   	  playAudio(2); // Spotted client sound
-		  //stepper_step_angle(45,15); // Do not turn, stop movement.
+	   	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor so it stops moving
 		  sentryFireRoutine();
+	   	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor after sentryFireRoutine returns
 	  }
-	  if(distanceRight < 22 && distanceRight < distanceCenter && distanceRight < distanceLeft){
+	  if(distanceRight < 16 && distanceRight < distanceCenter && distanceRight < distanceLeft){
 	   	  playAudio(2); // Spotted client sound
 		  stepper_step_angle(45,15,0); // Turn right 45, at a rate of 15 RPM
+	   	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET); // A4988 ENABLE Pin trigger, will disable motor so it stops moving
 		  sentryFireRoutine();
+	   	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET); // A4988 ENABLE Pin trigger, will re-enable motor after sentryFireRoutine returns
 		  stepper_step_angle(45,7.5,1); // Return to last position
-	  }*/
-
-
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

@@ -22,7 +22,7 @@ The STM will be used to operate the following
 * [C](https://en.wikipedia.org/wiki/C_(programming_language)) - Language Used
 
 ## Author
-* **John Arena** - [JAeportfolio](https://github.com/JAePortfolio)
+* **John Arena** - [JAePortfolio](https://github.com/JAePortfolio)
 
 ## License
-This project is NOT open source.
+This project is **NOT** open source.
